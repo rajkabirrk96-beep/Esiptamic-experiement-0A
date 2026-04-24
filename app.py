@@ -383,7 +383,13 @@ def prestudy_submit():
 
 @app.route('/round/<int:rnd>')
 def round_page(rnd):
+    # Prevents going back to a finished round
+    last_completed = len(session.get('rd', {})) // 6 # Each round saves 6 fields
+    if rnd <= last_completed:
+        return redirect(url_for('round_page', rnd=last_completed + 1))
+
     if rnd<1 or rnd>15: return redirect(url_for('final_results'))
+    
     sector=session.get('sector','Information Technology')
     row=ALL_ROUNDS.get(sector,ALL_ROUNDS["Information Technology"])[rnd-1]
     rnd_num,sa,pa,ga,va,sb,pb,gb,vb=row
@@ -397,14 +403,19 @@ def round_page(rnd):
     phase=get_phase(rnd)
     traj_a=generate_trajectory(pa,ga,va,seed=rnd*100+1)
     traj_b=generate_trajectory(pb,gb,vb,seed=rnd*100+2)
-    return render_template('round.html',
+    
+    response = make_response(render_template('round.html',
         rnd=rnd,sa=sa,sb=sb,
         pa=pa,pb=pb,
         change_a=change_a,change_b=change_b,
         traj_a=json.dumps(traj_a),
         traj_b=json.dumps(traj_b),
         ai_text=ai_text,phase=phase,
-        total_rounds=15,sector=sector)
+        total_rounds=15,sector=sector))
+    
+    # Force the browser not to cache the page (assists in 'no back' logic)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
 
 @app.route('/round/<int:rnd>/submit',methods=['POST'])
 def round_submit(rnd):
