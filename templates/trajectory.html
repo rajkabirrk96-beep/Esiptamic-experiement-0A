@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% set color_a = "#0F6E56" if "+" in change_a else "#A32D2D" %}
+{% set color_b = "#0F6E56" if "+" in change_b else "#A32D2D" %}
+
+<div class="card">
+  <h2>Round {{ rnd }} — Real-Time Price Action</h2>
+  <p>These charts show how each stock moved over the past 6 months.
+    Hover over the chart to see exact prices on any day.</p>
+
+  <!-- Stock A -->
+  <div style="background:var(--gray);border-radius:12px;padding:20px;
+              margin-bottom:20px;border:1px solid var(--border);">
+    <div style="display:flex;justify-content:space-between;
+                align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+      <div>
+        <div style="font-weight:bold;color:var(--navy);font-size:16px;">{{ sa }}</div>
+        <div style="font-size:13px;color:var(--muted);">
+          Today's Price:
+          <strong style="color:{{ color_a }};font-size:16px;">${{ "%.2f"|format(pa) }}</strong>
+          &nbsp;<span style="color:{{ color_a }};font-weight:bold;">{{ change_a }}</span>
+        </div>
+      </div>
+      <div id="tooltipA" style="background:white;border:1px solid var(--border);
+             border-radius:8px;padding:8px 14px;font-size:13px;
+             color:var(--navy);display:none;text-align:right;min-width:140px;">
+        <div id="ttDayA" style="color:var(--muted);font-size:11px;margin-bottom:2px;"></div>
+        <div id="ttPriceA" style="font-weight:bold;font-size:17px;"></div>
+        <div id="ttChangeA" style="font-size:11px;margin-top:2px;"></div>
+      </div>
+    </div>
+    <canvas id="chartA" style="width:100%;height:200px;background:white;
+      border-radius:8px;border:1px solid var(--border);
+      display:block;cursor:crosshair;" width="700" height="200"></canvas>
+    <div style="display:flex;justify-content:space-between;
+                font-size:11px;color:var(--muted);margin-top:6px;padding:0 4px;">
+      <span>6 months ago</span><span>3 months ago</span><span>Today</span>
+    </div>
+  </div>
+
+  <!-- Stock B -->
+  <div style="background:var(--gray);border-radius:12px;padding:20px;
+              margin-bottom:24px;border:1px solid var(--border);">
+    <div style="display:flex;justify-content:space-between;
+                align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+      <div>
+        <div style="font-weight:bold;color:var(--navy);font-size:16px;">{{ sb }}</div>
+        <div style="font-size:13px;color:var(--muted);">
+          Today's Price:
+          <strong style="color:#6B21A8;font-size:16px;">${{ "%.2f"|format(pb) }}</strong>
+          &nbsp;<span style="color:{{ color_b }};font-weight:bold;">{{ change_b }}</span>
+        </div>
+      </div>
+      <div id="tooltipB" style="background:white;border:1px solid var(--border);
+             border-radius:8px;padding:8px 14px;font-size:13px;
+             color:var(--navy);display:none;text-align:right;min-width:140px;">
+        <div id="ttDayB" style="color:var(--muted);font-size:11px;margin-bottom:2px;"></div>
+        <div id="ttPriceB" style="font-weight:bold;font-size:17px;color:#6B21A8;"></div>
+        <div id="ttChangeB" style="font-size:11px;margin-top:2px;"></div>
+      </div>
+    </div>
+    <canvas id="chartB" style="width:100%;height:200px;background:white;
+      border-radius:8px;border:1px solid var(--border);
+      display:block;cursor:crosshair;" width="700" height="200"></canvas>
+    <div style="display:flex;justify-content:space-between;
+                font-size:11px;color:var(--muted);margin-top:6px;padding:0 4px;">
+      <span>6 months ago</span><span>3 months ago</span><span>Today</span>
+    </div>
+  </div>
+
+  <a href="{{ next_url }}" class="btn btn-full">
+    {% if rnd == 15 %}View Final Results →
+    {% elif rnd == 5 or rnd == 10 %}View Investment Summary →
+    {% else %}Continue to Round {{ rnd + 1 }} →{% endif %}
+  </a>
+</div>
+
+<script>
+var trajA  = {{ traj_a | safe }};
+var trajB  = {{ traj_b | safe }};
+var startA = {{ pa }};
+var startB = {{ pb }};
+
+// Add subtle intraday detail — max 0.2% noise — realistic
+function addIntraday(prices, seed) {
+  var out=[], s=seed;
+  function rnd(){s=(s*9301+49297)%233280;return s/233280;}
+  for(var i=0;i<prices.length;i++){
+    out.push(prices[i]);
+    if(i<prices.length-1){
+      for(var j=1;j<=3;j++){
+        var interp=prices[i]+(prices[i+1]-prices[i])*(j/4);
+        var noise=(rnd()-0.5)*2*interp*0.0015;
+        out.push(+(interp+noise).toFixed(2));
+      }
+    }
+  }
+  return out;
+}
+
+var dA=addIntraday(trajA,1001);
+var dB=addIntraday(trajB,2002);
+
+function setupChart(cid,prices,color,startP,tipId,dayId,priceId,chgId){
+  var canvas=document.getElementById(cid);
+  if(!canvas) return;
+  var rect=canvas.getBoundingClientRect();
+  canvas.width=rect.width||700;
+  canvas.height=rect.height||200;
+  var ctx=canvas.getContext('2d');
+  var W=canvas.width,H=canvas.height;
+  var pad={top:16,right:16,bottom:36,left:62};
+  var cW=W-pad.left-pad.right,cH=H-pad.top-pad.bottom;
+  var mn=Math.min.apply(null,prices),mx=Math.max.apply(null,prices);
+  var rng=mx-mn||1,buf=rng*0.12;
+  var lo=mn-buf,hi=mx+buf;
+  function px(i){return pad.left+(i/(prices.length-1))*cW;}
+  function py(p){return pad.top+((hi-p)/(hi-lo))*cH;}
+
+  function draw(hlIdx){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='white';ctx.fillRect(0,0,W,H);
+
+    // Grid
+    ctx.strokeStyle='#F1F5F9';ctx.lineWidth=1;
+    for(var i=0;i<=4;i++){
+      var val=lo+(hi-lo)*(1-i/4);
+      var y=pad.top+(i/4)*cH;
+      ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();
+      ctx.fillStyle='#94A3B8';ctx.font='10px Arial';ctx.textAlign='right';
+      ctx.fillText('$'+val.toFixed(2),pad.left-5,y+3);
+    }
+
+    // Y label
+    ctx.save();ctx.translate(12,pad.top+cH/2);ctx.rotate(-Math.PI/2);
+    ctx.fillStyle='#64748B';ctx.font='bold 10px Arial';ctx.textAlign='center';
+    ctx.fillText('Price (USD)',0,0);ctx.restore();
+
+    // Month dividers and X labels
+    var months=['M1','M2','M3','M4','M5','M6'];
+    for(var m=0;m<6;m++){
+      ctx.strokeStyle='#F8FAFC';ctx.lineWidth=1;
+      ctx.beginPath();
+      ctx.moveTo(pad.left+((m+1)/6)*cW,pad.top);
+      ctx.lineTo(pad.left+((m+1)/6)*cW,pad.top+cH);
+      ctx.stroke();
+      ctx.fillStyle='#94A3B8';ctx.font='10px Arial';ctx.textAlign='center';
+      ctx.fillText(months[m],pad.left+(m+0.5)/6*cW,H-10);
+    }
+
+    // X axis label
+    ctx.fillStyle='#64748B';ctx.font='bold 10px Arial';ctx.textAlign='center';
+    ctx.fillText('Trading Days (6 Months)',pad.left+cW/2,H-22);
+
+    // Axes
+    ctx.strokeStyle='#CBD5E1';ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(pad.left,pad.top);ctx.lineTo(pad.left,pad.top+cH);
+    ctx.lineTo(pad.left+cW,pad.top+cH);ctx.stroke();
+
+    // Gradient fill
+    var grad=ctx.createLinearGradient(0,pad.top,0,pad.top+cH);
+    var rgb=color==='#0F6E56'?'15,110,86':
+            color==='#6B21A8'?'107,33,168':'163,45,45';
+    grad.addColorStop(0,'rgba('+rgb+',0.15)');
+    grad.addColorStop(1,'rgba('+rgb+',0.00)');
+
+    ctx.beginPath();
+    for(var i=0;i<prices.length;i++){
+      if(i===0)ctx.moveTo(px(i),py(prices[i]));
+      else ctx.lineTo(px(i),py(prices[i]));
+    }
+    ctx.lineTo(px(prices.length-1),pad.top+cH);
+    ctx.lineTo(px(0),pad.top+cH);
+    ctx.closePath();ctx.fillStyle=grad;ctx.fill();
+
+    // Price line
+    ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=2;
+    for(var i=0;i<prices.length;i++){
+      if(i===0)ctx.moveTo(px(i),py(prices[i]));
+      else ctx.lineTo(px(i),py(prices[i]));
+    }
+    ctx.stroke();
+
+    // Start/end dots
+    [[0,prices[0]],[prices.length-1,prices[prices.length-1]]].forEach(function(pt){
+      ctx.beginPath();ctx.arc(px(pt[0]),py(pt[1]),4,0,Math.PI*2);
+      ctx.fillStyle=color;ctx.fill();
+      ctx.strokeStyle='white';ctx.lineWidth=2;ctx.stroke();
+    });
+
+    // Crosshair
+    if(hlIdx!==null&&hlIdx>=0&&hlIdx<prices.length){
+      var hx=px(hlIdx),hy=py(prices[hlIdx]);
+      ctx.strokeStyle='rgba(100,116,139,0.45)';
+      ctx.lineWidth=1;ctx.setLineDash([5,4]);
+      ctx.beginPath();ctx.moveTo(hx,pad.top);ctx.lineTo(hx,pad.top+cH);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(pad.left,hy);ctx.lineTo(pad.left+cW,hy);ctx.stroke();
+      ctx.setLineDash([]);
+      // Dot
+      ctx.beginPath();ctx.arc(hx,hy,6,0,Math.PI*2);
+      ctx.fillStyle=color;ctx.fill();
+      ctx.strokeStyle='white';ctx.lineWidth=2;ctx.stroke();
+      // Y price tag
+      ctx.fillStyle=color;
+      ctx.fillRect(0,hy-11,pad.left-3,22);
+      ctx.fillStyle='white';ctx.font='bold 9px Arial';ctx.textAlign='center';
+      ctx.fillText('$'+prices[hlIdx].toFixed(2),(pad.left-3)/2,hy+3);
+    }
+  }
+
+  draw(null);
+
+  function getIdx(clientX){
+    var r=canvas.getBoundingClientRect();
+    var sx=canvas.width/r.width;
+    var mx=(clientX-r.left)*sx;
+    var raw=(mx-pad.left)/cW*(prices.length-1);
+    return Math.max(0,Math.min(prices.length-1,Math.round(raw)));
+  }
+
+  function showTip(idx){
+    var tip=document.getElementById(tipId);
+    var tdDay=document.getElementById(dayId);
+    var tdPr=document.getElementById(priceId);
+    var tdCh=document.getElementById(chgId);
+    if(!tip) return;
+    tip.style.display='block';
+    var dayNum=Math.round(idx/(prices.length-1)*126);
+    var mo=Math.ceil((dayNum+1)/21)||1;
+    if(mo>6)mo=6;
+    var din=((dayNum%21)||21);
+    tdDay.textContent='Month '+mo+', Day '+din;
+    tdPr.textContent='$'+prices[idx].toFixed(2);
+    var chg=((prices[idx]-startP)/startP*100);
+    tdCh.textContent=(chg>=0?'+':'')+chg.toFixed(2)+'% from start';
+    tdCh.style.color=chg>=0?'#0F6E56':'#A32D2D';
+  }
+
+  canvas.addEventListener('mousemove',function(e){
+    var i=getIdx(e.clientX);
+    draw(i);showTip(i);
+  });
+  canvas.addEventListener('mouseleave',function(){
+    draw(null);
+    var tip=document.getElementById(tipId);
+    if(tip)tip.style.display='none';
+  });
+  canvas.addEventListener('touchmove',function(e){
+    e.preventDefault();
+    var i=getIdx(e.touches[0].clientX);
+    draw(i);showTip(i);
+  },{passive:false});
+}
+
+window.addEventListener('load',function(){
+  setupChart('chartA',dA,'{{ color_a }}',startA,'tooltipA','ttDayA','ttPriceA','ttChangeA');
+  setupChart('chartB',dB,'#6B21A8',startB,'tooltipB','ttDayB','ttPriceB','ttChangeB');
+});
+window.addEventListener('resize',function(){
+  setupChart('chartA',dA,'{{ color_a }}',startA,'tooltipA','ttDayA','ttPriceA','ttChangeA');
+  setupChart('chartB',dB,'#6B21A8',startB,'tooltipB','ttDayB','ttPriceB','ttChangeB');
+});
+</script>
+{% endblock %}
